@@ -1,0 +1,15 @@
+[submodule "M1Pro-SOC-Armbian-Public"]
+	path = M1Pro-SOC-Armbian-Public
+	url = https://github.com/xateesix/M1Pro-SOC-Armbian-Public
+	branch = main
+
+[submodule "M1-Pro-SOC_armbian-build"]
+	path = M1-Pro-SOC_armbian-build
+	url = https://github.com/xateesix/M1-Pro-SOC_armbian-build
+	branch = main
+
+[submodule "M1-SOC-Armbian-Build"]
+        path = M1-SOC-Armbian-Build
+        url = https://github.com/xateesix/M1-SOC-Armbian-Build
+        branch = main
+

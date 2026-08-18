@@ -1,0 +1,18 @@
+# Build and package output
+output/
+pack/
+cache/
+.tmp/
+
+# Armbian build artifacts
+**/output/
+**/cache/
+**/.tmp/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS/editor
+.DS_Store
+.vscode/
