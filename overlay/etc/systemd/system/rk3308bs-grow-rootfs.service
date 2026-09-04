@@ -1,0 +1,14 @@
+[Unit]
+Description=RK3308BS: grow rootfs ext4 filesystem to fill its eMMC partition (filesystem-only, no partition-table changes)
+DefaultDependencies=no
+After=local-fs.target
+ConditionPathExists=!/root/.rk3308bs-rootfs-grown
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rk3308bs-grow-rootfs.sh
+RemainAfterExit=yes
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

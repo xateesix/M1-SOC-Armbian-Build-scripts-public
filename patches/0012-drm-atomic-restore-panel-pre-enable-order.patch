@@ -1,0 +1,65 @@
+From: RK3308BS M1SOC build <build@localhost>
+Date: 2026-09-03
+Subject: [PATCH] drm/atomic-helper: restore pre-enable-before-CRTC modeset order for RK3308 RGB/DPI panel
+
+Between kernel 6.18.0 and 6.18.49, commit c12df0f5ca41 ("Revert
+\"drm/atomic-helper: Re-order bridge chain pre-enable and post-disable\"")
+changed drm_atomic_helper_commit_modeset_enables() so that the CRTC is
+enabled BEFORE the encoder/bridge pre_enable step:
+
+    6.18.0 : bridge pre_enable -> crtc_enable -> bridge_enable   (works)
+    6.18.49: crtc_enable -> bridge pre_enable -> bridge_enable   (hangs)
+
+On this board the panel is attached as a DPI panel-bridge
+(drm_panel_bridge_add_typed(..., DRM_MODE_CONNECTOR_DPI) in the RK3308
+RGB driver), so the bridge pre_enable IS the panel power/reset-GPIO
+prepare sequence. With the 6.18.49 order the RK3308 VOP (CRTC) is
+enabled and begins scanning out to the RGB/DPI pins before the panel has
+been powered and taken out of reset, which hard-hangs the SoC during the
+first fbdev modeset commit (confirmed via drm.debug: freeze immediately
+after "[drm:drm_mode_addfb2] [FB:40]", i.e. the CRTC-enable commit).
+
+The upstream revert was made because the pre_enable-first order
+regressed OTHER platforms (R-Car, MCDE, newer Rockchip VOP2); the agreed
+long-term fix is per-driver sequencing. This kernel is built for a single
+board (RK3308 VOP1 + fixed RGB/DPI panel), so restoring the
+pre_enable-first order here is safe and matches the exact sequence that
+worked on 6.18.0 (v64-v67). Only the call ordering in the two helper
+call sites is changed; the exported helper functions themselves are
+untouched.
+
+---
+ drivers/gpu/drm/drm_atomic_helper.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/drm_atomic_helper.c b/drivers/gpu/drm/drm_atomic_helper.c
+index b06a5cba5295..038f666091b5 100644
+--- a/drivers/gpu/drm/drm_atomic_helper.c
++++ b/drivers/gpu/drm/drm_atomic_helper.c
+@@ -1370,9 +1370,9 @@ disable_outputs(struct drm_device *dev, struct drm_atomic_state *state)
+ {
+ 	drm_atomic_helper_commit_encoder_bridge_disable(dev, state);
+ 
+-	drm_atomic_helper_commit_encoder_bridge_post_disable(dev, state);
+-
+ 	drm_atomic_helper_commit_crtc_disable(dev, state);
++
++	drm_atomic_helper_commit_encoder_bridge_post_disable(dev, state);
+ }
+ 
+ /**
+@@ -1758,10 +1758,10 @@ EXPORT_SYMBOL(drm_atomic_helper_commit_encoder_bridge_enable);
+ void drm_atomic_helper_commit_modeset_enables(struct drm_device *dev,
+ 					      struct drm_atomic_state *state)
+ {
+-	drm_atomic_helper_commit_crtc_enable(dev, state);
+-
+ 	drm_atomic_helper_commit_encoder_bridge_pre_enable(dev, state);
+ 
++	drm_atomic_helper_commit_crtc_enable(dev, state);
++
+ 	drm_atomic_helper_commit_encoder_bridge_enable(dev, state);
+ 
+ 	drm_atomic_helper_commit_writebacks(dev, state);
+-- 
+2.43.0

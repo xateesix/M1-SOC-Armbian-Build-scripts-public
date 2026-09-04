@@ -1,0 +1,14 @@
+[Unit]
+Description=RK3308BS load 8189fs WiFi modules before networking
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/sbin/rk3308bs-load-wifi.sh
+RemainAfterExit=yes
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

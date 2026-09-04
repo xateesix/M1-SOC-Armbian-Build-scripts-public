@@ -1,0 +1,93 @@
+--- a/drivers/gpu/drm/panel/panel-simple.c	2026-06-12 22:50:53.596899310 -0700
++++ b/drivers/gpu/drm/panel/panel-simple.c	2026-06-12 22:50:53.628900028 -0700
+@@ -24,6 +24,7 @@
+ #include <linux/delay.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
++#include <linux/backlight.h>
+ #include <linux/media-bus-format.h>
+ #include <linux/module.h>
+ #include <linux/of_device.h>
+@@ -472,12 +473,12 @@
+ 
+ 	of_property_read_u32(np, "bus-format", &desc->bus_format);
+ 	desc->bpc = 8;
+-	dev_info(dev, "panel-dpi %pOF %ux%u @ %lu Hz\n", np,
+-		 timing->hactive.typ, timing->vactive.typ, timing->pixelclock);
++	dev_info(dev, "panel-dpi %pOF %ux%u @ %u Hz\n", np,
++		 timing->hactive.typ, timing->vactive.typ, timing->pixelclock.typ);
+ 
+ 	/* Extract bus_flags from display_timing */
+ 	bus_flags = 0;
+-	vm.flags = timing->flags;
++	videomode_from_timing(timing, &vm);
+ 	drm_bus_flags_from_videomode(&vm, &bus_flags);
+ 	desc->bus_flags = bus_flags;
+ 
+@@ -718,6 +719,7 @@
+ 	if (IS_ERR(desc))
+ 		return ERR_CAST(desc);
+ 
++	dev_info(dev, "panel-simple probe %pOF\n", dev->of_node);
+ 	panel = devm_drm_panel_alloc(dev, struct panel_simple, base,
+ 				     &panel_simple_funcs, desc->connector_type);
+ 	if (IS_ERR(panel))
+@@ -726,14 +728,24 @@
+ 	panel->desc = desc;
+ 
+ 	panel->supply = devm_regulator_get_optional(dev, "power");
+-	if (IS_ERR(panel->supply))
+-		return ERR_CAST(panel->supply);
++	if (IS_ERR(panel->supply)) {
++		if (PTR_ERR(panel->supply) == -ENODEV)
++			panel->supply = NULL;
++		else
++			return ERR_CAST(panel->supply);
++	}
+ 
+ 	panel->enable_gpio = devm_gpiod_get_optional(dev, "enable",
+ 						     GPIOD_OUT_LOW);
+-	if (IS_ERR(panel->enable_gpio))
+-		return dev_err_cast_probe(dev, panel->enable_gpio,
+-					  "failed to request GPIO\n");
++	if (IS_ERR(panel->enable_gpio)) {
++		if (PTR_ERR(panel->enable_gpio) == -EPROBE_DEFER) {
++			dev_info(dev, "enable GPIO defer, continuing without\n");
++			panel->enable_gpio = NULL;
++		} else {
++			return dev_err_cast_probe(dev, panel->enable_gpio,
++						  "failed to request GPIO\n");
++		}
++	}
+ 
+ 	err = of_drm_get_panel_orientation(dev->of_node, &panel->orientation);
+ 	if (err) {
+@@ -827,13 +839,24 @@
+ 	pm_runtime_set_autosuspend_delay(dev, 1000);
+ 	pm_runtime_use_autosuspend(dev);
+ 
+-	err = drm_panel_of_backlight(&panel->base);
+-	if (err) {
+-		dev_err_probe(dev, err, "Could not find backlight\n");
+-		goto disable_pm_runtime;
++	{
++		struct device_node *bl_np;
++
++		bl_np = of_parse_phandle(dev->of_node, "backlight", 0);
++		if (bl_np) {
++			struct backlight_device *bd;
++
++			bd = of_find_backlight_by_node(bl_np);
++			of_node_put(bl_np);
++			if (bd)
++				panel->base.backlight = bd;
++			else
++				dev_info(dev, "backlight not ready yet, continuing\n");
++		}
+ 	}
+ 
+ 	drm_panel_add(&panel->base);
++	dev_info(dev, "panel-simple registered %pOF\n", dev->of_node);
+ 
+ 	return panel;
+ 
