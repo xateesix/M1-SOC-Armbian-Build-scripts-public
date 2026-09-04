@@ -1,0 +1,37 @@
+--- a/drivers/input/touchscreen/goodix.c	2026-08-27 08:20:27.046777378 -0700
++++ b/drivers/input/touchscreen/goodix.c	2026-08-27 08:27:18.066445320 -0700
+@@ -781,20 +781,31 @@
+ 	if (error)
+ 		goto error;
+ 
+-	msleep(20);				/* T2: > 10ms */
++	/*
++	 * RK3308BS EVB AMIC V11: the upstream T2/T3/T4 timings below are too
++	 * tight for this board's GT911 -- the chip never acks on I2C at all
++	 * afterward (whole bus goes silent, not just this address). A
++	 * generous manual GPIO bit-bang reset (500ms/100ms/500ms) reliably
++	 * brings the chip up on real hardware; these values match that
++	 * empirically-verified timing directly (a smaller, "safe middle
++	 * ground" version of this patch -- 50ms/5-6ms/80ms -- was tried
++	 * first and did NOT work, confirming the chip genuinely needs
++	 * timing in this much larger ballpark, not just "somewhat more").
++	 */
++	msleep(500);				/* T2: > 10ms (was 20ms) */
+ 
+ 	/* HIGH: 0x28/0x29, LOW: 0xBA/0xBB */
+ 	error = goodix_irq_direction_output(ts, ts->client->addr == 0x14);
+ 	if (error)
+ 		goto error;
+ 
+-	usleep_range(100, 2000);		/* T3: > 100us */
++	usleep_range(100000, 110000);		/* T3: > 100us (was 100-2000us) */
+ 
+ 	error = gpiod_direction_output(ts->gpiod_rst, 1);
+ 	if (error)
+ 		goto error;
+ 
+-	usleep_range(6000, 10000);		/* T4: > 5ms */
++	msleep(500);				/* T4: > 5ms (was 6-10ms) */
+ 
+ 	return 0;
+ 

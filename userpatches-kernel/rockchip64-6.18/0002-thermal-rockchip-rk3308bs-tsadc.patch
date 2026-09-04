@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: RK3308BS Armbian <build@armbian.local>
+Date: Wed, 11 Jun 2026 12:00:00 +0000
+Subject: [PATCH] thermal: rockchip: RK3308BS linear TSADC table
+
+RK3308BS (Artillery M1 Pro S1-SOC, GRF chip ID 0x3308C) uses a linear
+ADC conversion (kNum/bNum) in Rockchip vendor 5.10, not the rk3328 lookup
+table used by rk3308-tsadc. Without this, Armbian reads bogus high
+temperatures and hits soc-thermal critical trips on a cold SoC.
+
+Apply after Armbian rk3308-add-tsadc-driver.patch.
+---
+ drivers/thermal/rockchip_thermal.c | 46 +++++++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+diff --git a/drivers/thermal/rockchip_thermal.c b/drivers/thermal/rockchip_thermal.c
+index 111111111111..222222222222 100644
+--- a/drivers/thermal/rockchip_thermal.c
++++ b/drivers/thermal/rockchip_thermal.c
+@@ -62,6 +62,8 @@ struct chip_tsadc_table {
+ 	unsigned int length;
+ 	u32 data_mask;
+ 	enum adc_sort_mode mode;
++	int kNum;
++	int bNum;
+ };
+ 
+ /**
+@@ -277,9 +279,11 @@
+ #define GRF_CON_TSADC_CH_INV			(0x10001 << 1)
+ 
+ 
+ #define RK_MAX_TEMP				(180000)
++#define MIN_TEMP				(-40000)
++#define MAX_TEMP				(125000)
+ 
+ /**
+  * struct tsadc_table - code to temperature conversion table
+  * @code: the value of adc channel
+ 
+@@ -577,6 +581,9 @@ static u32 rk_tsadcv2_temp_to_code(const struct chip_tsadc_table *table,
+ 	unsigned int denom;
+ 	u32 error = table->data_mask;
+ 
++	if (table->kNum)
++		return DIV_ROUND_UP(temp / 100 * table->kNum, 10000) + table->bNum;
++
+ 	low = 0;
+ 	high = (table->length - 1) - 1; /* ignore the last check for table */
+ 	mid = (high + low) / 2;
+@@ -629,6 +636,13 @@ static int rk_tsadcv2_code_to_temp(const struct chip_tsadc_table *table,
+ 	unsigned int mid = (low + high) / 2;
+ 	unsigned int num;
+ 	unsigned long denom;
++
++	if (table->kNum) {
++		*temp = (((int)code - table->bNum) * 10000 / table->kNum) * 100;
++		if (*temp < MIN_TEMP || *temp > MAX_TEMP)
++			return -EAGAIN;
++		return 0;
++	}
+ 
+ 	WARN_ON(table->length < 2);
+ 
+@@ -1101,6 +1115,28 @@ static const struct rockchip_tsadc_chip rk3308_tsadc_data = {
+ 	},
+ };
+ 
++static const struct rockchip_tsadc_chip rk3308bs_tsadc_data = {
++	.chn_num = 1, /* BS: CPU channel only (vendor rk3308bs_tsadc_data) */
++
++	.tshut_mode = TSHUT_MODE_CRU,
++	.tshut_temp = 95000,
++
++	.initialize = rk_tsadcv4_initialize,
++	.irq_ack = rk_tsadcv3_irq_ack,
++	.control = rk_tsadcv3_control,
++	.get_temp = rk_tsadcv2_get_temp,
++	.set_alarm_temp = rk_tsadcv2_alarm_temp,
++	.set_tshut_temp = rk_tsadcv2_tshut_temp,
++	.set_tshut_mode = rk_tsadcv2_tshut_mode,
++
++	.table = {
++		.kNum = 2699,
++		.bNum = 2796,
++		.data_mask = TSADCV2_DATA_MASK,
++		.mode = ADC_INCREMENT,
++	},
++};
++
+ static const struct rockchip_tsadc_chip px30_tsadc_data = {
+ 	/* cpu, gpu */
+ 	.chn_offset = 0,
+@@ -1393,6 +1429,10 @@ static const struct of_device_id of_rockchip_thermal_match[] = {
+ 		.compatible = "rockchip,rk3308-tsadc",
+ 		.data = (void *)&rk3308_tsadc_data,
+ 	},
++	{
++		.compatible = "rockchip,rk3308bs-tsadc",
++		.data = (void *)&rk3308bs_tsadc_data,
++	},
+ 	{
+ 		.compatible = "rockchip,rk3328-tsadc",
+ 		.data = (void *)&rk3328_tsadc_data,
+-- 
+Armbian

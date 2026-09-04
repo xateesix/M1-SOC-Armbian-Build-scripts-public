@@ -1,0 +1,12 @@
+# RK3308BS 512MB: timer_list corruption in __run_timers (call_timer_fn @ 0x200000000).
+# CONFIG_PREEMPT is not set
+# CONFIG_PREEMPT_VOLUNTARY is not set
+CONFIG_PREEMPT_NONE=y
+CONFIG_HIGH_RES_TIMERS=n
+# CONFIG_NO_HZ is not set
+# CONFIG_NO_HZ_IDLE is not set
+# CONFIG_NO_HZ_COMMON is not set
+CONFIG_HZ_PERIODIC=y
+# CONFIG_HZ_250 is not set
+CONFIG_HZ_100=y
+CONFIG_HZ=100

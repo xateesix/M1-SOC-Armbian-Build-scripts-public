@@ -1,0 +1,172 @@
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_drv.c b/drivers/gpu/drm/rockchip/rockchip_drm_drv.c
+index 111111111..222222222 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_drv.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_drv.c
+@@ -527,6 +527,8 @@ static int __init rockchip_drm_init(void)
+ 	ADD_ROCKCHIP_SUB_DRIVER(vop2_platform_driver, CONFIG_ROCKCHIP_VOP2);
+ 	ADD_ROCKCHIP_SUB_DRIVER(rockchip_lvds_driver,
+ 				CONFIG_ROCKCHIP_LVDS);
++	ADD_ROCKCHIP_SUB_DRIVER(rockchip_rgb_platform_driver,
++				CONFIG_ROCKCHIP_RGB);
+ 	ADD_ROCKCHIP_SUB_DRIVER(rockchip_dp_driver,
+ 				CONFIG_ROCKCHIP_ANALOGIX_DP);
+ 	ADD_ROCKCHIP_SUB_DRIVER(cdn_dp_driver, CONFIG_ROCKCHIP_CDN_DP);
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_drv.h b/drivers/gpu/drm/rockchip/rockchip_drm_drv.h
+index 333333333..444444444 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_drv.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_drv.h
+@@ -95,6 +95,7 @@ extern struct platform_driver dw_mipi_dsi2_rockchip_driver;
+ extern struct platform_driver inno_hdmi_driver;
+ extern struct platform_driver rockchip_dp_driver;
+ extern struct platform_driver rockchip_lvds_driver;
++extern struct platform_driver rockchip_rgb_platform_driver;
+ extern struct platform_driver vop_platform_driver;
+ extern struct platform_driver rk3066_hdmi_driver;
+ extern struct platform_driver vop2_platform_driver;
+diff --git a/drivers/gpu/drm/rockchip/rockchip_rgb.c b/drivers/gpu/drm/rockchip/rockchip_rgb.c
+index 555555555..666666666 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_rgb.c
++++ b/drivers/gpu/drm/rockchip/rockchip_rgb.c
+@@ -7,6 +7,8 @@
+ 
+ #include <linux/component.h>
+ #include <linux/media-bus-format.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
+ #include <linux/of_graph.h>
+ 
+ #include <drm/display/drm_dp_helper.h>
+@@ -185,3 +187,120 @@ void rockchip_rgb_fini(struct rockchip_rgb *rgb)
+ 	drm_encoder_cleanup(&rgb->encoder.encoder);
+ }
+ EXPORT_SYMBOL_GPL(rockchip_rgb_fini);
++
++/*
++ * RK3308 factory DT: rgb@ port@0 -> vop, port@1 -> panel (not INTERNAL_RGB on vop).
++ * Linux 6.18 dropped the standalone platform driver; restore it for rk3308-rgb.
++ */
++static int rockchip_rgb_platform_bind(struct device *dev, struct device *master,
++				      void *data)
++{
++	struct rockchip_rgb *rgb = dev_get_drvdata(dev);
++	struct drm_device *drm_dev = data;
++	struct drm_encoder *encoder;
++	struct drm_panel *panel = NULL;
++	struct drm_bridge *bridge = NULL;
++	struct drm_connector *connector;
++	int ret;
++
++	rgb->drm_dev = drm_dev;
++
++	ret = drm_of_find_panel_or_bridge(dev->of_node, 1, 0, &panel, &bridge);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to find panel or bridge\n");
++
++	encoder = &rgb->encoder.encoder;
++	encoder->possible_crtcs = drm_of_find_possible_crtcs(drm_dev, dev->of_node);
++	if (!encoder->possible_crtcs)
++		return dev_err_probe(dev, -EINVAL, "missing possible crtcs\n");
++
++	ret = drm_simple_encoder_init(drm_dev, encoder, DRM_MODE_ENCODER_NONE);
++	if (ret < 0)
++		return dev_err_probe(dev, ret, "failed to initialize encoder\n");
++
++	drm_encoder_helper_add(encoder, &rockchip_rgb_encoder_helper_funcs);
++
++	if (panel) {
++		bridge = drm_panel_bridge_add_typed(panel, DRM_MODE_CONNECTOR_DPI);
++		if (IS_ERR(bridge))
++			return dev_err_probe(dev, PTR_ERR(bridge),
++					    "failed to add panel bridge\n");
++	}
++
++	rgb->bridge = bridge;
++
++	ret = drm_bridge_attach(encoder, rgb->bridge, NULL,
++				DRM_BRIDGE_ATTACH_NO_CONNECTOR);
++	if (ret)
++		goto err_encoder;
++
++	connector = drm_bridge_connector_init(drm_dev, encoder);
++	if (IS_ERR(connector)) {
++		ret = PTR_ERR(connector);
++		goto err_encoder;
++	}
++
++	ret = drm_connector_attach_encoder(connector, encoder);
++	if (ret < 0)
++		goto err_encoder;
++
++	return 0;
++
++err_encoder:
++	if (panel)
++		drm_panel_bridge_remove(rgb->bridge);
++	drm_encoder_cleanup(encoder);
++	return ret;
++}
++
++static void rockchip_rgb_platform_unbind(struct device *dev, struct device *master,
++					 void *data)
++{
++	struct rockchip_rgb *rgb = dev_get_drvdata(dev);
++
++	if (rgb->bridge)
++		drm_panel_bridge_remove(rgb->bridge);
++	drm_encoder_cleanup(&rgb->encoder.encoder);
++}
++
++static const struct component_ops rockchip_rgb_platform_component_ops = {
++	.bind = rockchip_rgb_platform_bind,
++	.unbind = rockchip_rgb_platform_unbind,
++};
++
++static int rockchip_rgb_platform_probe(struct platform_device *pdev)
++{
++	struct rockchip_rgb *rgb;
++
++	if (!pdev->dev.of_node)
++		return -ENODEV;
++
++	rgb = devm_kzalloc(&pdev->dev, sizeof(*rgb), GFP_KERNEL);
++	if (!rgb)
++		return -ENOMEM;
++
++	rgb->dev = &pdev->dev;
++	platform_set_drvdata(pdev, rgb);
++
++	return component_add(&pdev->dev, &rockchip_rgb_platform_component_ops);
++}
++
++static void rockchip_rgb_platform_remove(struct platform_device *pdev)
++{
++	component_del(&pdev->dev, &rockchip_rgb_platform_component_ops);
++}
++
++static const struct of_device_id rockchip_rgb_platform_dt_ids[] = {
++	{ .compatible = "rockchip,rk3308-rgb" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, rockchip_rgb_platform_dt_ids);
++
++struct platform_driver rockchip_rgb_platform_driver = {
++	.probe = rockchip_rgb_platform_probe,
++	.remove = rockchip_rgb_platform_remove,
++	.driver = {
++		.name = "rockchip-rgb",
++		.of_match_table = rockchip_rgb_platform_dt_ids,
++	},
++};
+diff --git a/drivers/gpu/drm/rockchip/rockchip_vop_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop_reg.c
+index 777777777..888888888 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_vop_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop_reg.c
+@@ -102,7 +102,7 @@ static const struct vop_data rk3308_vop = {
+ 	.intr = &rk3308_lit_intr,
+ 	.win = rk3308_vop_lit_win_data,
+ 	.win_size = ARRAY_SIZE(rk3308_vop_lit_win_data),
+-	.feature = VOP_FEATURE_INTERNAL_RGB,
++	.feature = 0,
+ 	.max_output = { 1280, 800 },
+ 	.lut_size = 256,
+ };

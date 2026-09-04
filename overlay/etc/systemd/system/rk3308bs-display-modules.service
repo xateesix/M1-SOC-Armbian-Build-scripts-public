@@ -1,0 +1,13 @@
+[Unit]
+Description=RK3308BS LCD/backlight bring-up
+After=multi-user.target
+Wants=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/sbin/rk3308bs-load-display.sh
+RemainAfterExit=yes
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,55 @@
+From: RK3308BS M1SOC build <build@localhost>
+Date: 2026-09-03
+Subject: [PATCH] drm/panel: panel-simple: guard optional regulator in resume/suspend
+
+Patch 0007 changed the panel "power" supply acquisition to
+devm_regulator_get_optional() and maps the absent-supply case (-ENODEV)
+to p->supply = NULL. Our RK3308 panel node has no power-supply, so
+p->supply is NULL.
+
+Stock panel_simple_resume()/panel_simple_suspend() call
+regulator_enable(p->supply) / regulator_disable(p->supply)
+unconditionally. That was safe with the original devm_regulator_get()
+(non-NULL dummy regulator), but with the optional supply now NULL it
+dereferences NULL -- regulator_enable() reads regulator->rdev on its
+first line.
+
+This is the exact crash seen at the first fbdev modeset commit (kernel
+Oops 0000000096000004 in regulator_enable+0x38, called from
+panel_simple_resume -> panel_simple_prepare ->
+panel_bridge_atomic_pre_enable during drm_atomic_helper_commit_tail),
+which hard-faulted display bring-up and froze the board on boot. The
+probe-time regulator_enable() (patch 0009) was already guarded with
+"if (panel->supply)"; this does the same for resume/suspend.
+
+--- a/drivers/gpu/drm/panel/panel-simple.c
++++ b/drivers/gpu/drm/panel/panel-simple.c
+@@ -308,7 +308,8 @@
+ 	struct panel_simple *p = dev_get_drvdata(dev);
+ 
+ 	gpiod_set_value_cansleep(p->enable_gpio, 0);
+-	regulator_disable(p->supply);
++	if (p->supply)
++		regulator_disable(p->supply);
+ 	p->unprepared_time = ktime_get_boottime();
+ 
+ 	drm_edid_free(p->drm_edid);
+@@ -342,10 +343,12 @@
+ 
+ 	panel_simple_wait(p->unprepared_time, p->desc->delay.unprepare);
+ 
+-	err = regulator_enable(p->supply);
+-	if (err < 0) {
+-		dev_err(dev, "failed to enable supply: %d\n", err);
+-		return err;
++	if (p->supply) {
++		err = regulator_enable(p->supply);
++		if (err < 0) {
++			dev_err(dev, "failed to enable supply: %d\n", err);
++			return err;
++		}
+ 	}
+ 
+ 	gpiod_set_value_cansleep(p->enable_gpio, 1);
+-- 
+2.43.0

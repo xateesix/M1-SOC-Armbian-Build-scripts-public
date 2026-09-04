@@ -1,0 +1,19 @@
+RETIRED 2026-08-26 by agent session, per user instruction.
+
+This patch attempted to fix a suspected "WiFi/SDIO left in stuck state after a
+plain warm reboot" issue by forcing RK3308 boards to use watchdog-triggered
+reset instead of normal soft reset whenever no explicit reboot mode command is
+given.
+
+Live-tested on 2026-08-26 (genuine factory firmware, board reachable via SSH
+at your-host): a plain `sudo reboot` (normal soft reset, no watchdog forcing)
+fully restored WiFi within seconds (wpa_state=COMPLETED, real tx/rx traffic).
+The earlier "needs special reset handling" symptom was traced to stuck chip
+state from manual rmmod/modprobe/rfkill/GPIO-toggle testing during a live
+diagnostic session, NOT a real requirement for normal boot-to-boot operation.
+
+This patch is very likely unnecessary. Retired rather than deleted in case
+future testing on OUR OWN kernel/build (mainline 6.18 + out-of-tree rtl8189fs,
+different from factory's vendor 5.10 kernel) reveals a genuine need for it --
+if so, re-apply and validate specifically on our build with a clean-boot test
+methodology (no manual driver manipulation before checking WiFi state).

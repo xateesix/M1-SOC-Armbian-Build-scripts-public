@@ -1,0 +1,16 @@
+diff --git a/drivers/gpu/drm/panel/panel-simple.c b/drivers/gpu/drm/panel/panel-simple.c
+index 14867d772..a1b2c3d4e5 100644
+--- a/drivers/gpu/drm/panel/panel-simple.c
++++ b/drivers/gpu/drm/panel/panel-simple.c
+@@ -469,6 +469,11 @@ static struct panel_desc *panel_dpi_probe(struct device *dev)
+ 	of_property_read_u32(np, "width-mm", &desc->size.width);
+ 	of_property_read_u32(np, "height-mm", &desc->size.height);
+ 
++	of_property_read_u32(np, "bus-format", &desc->bus_format);
++	desc->bpc = 8;
++	dev_info(dev, "panel-dpi %pOF %ux%u @ %lu Hz\n", np,
++		 timing->hactive.typ, timing->vactive.typ, timing->pixelclock);
++
+ 	/* Extract bus_flags from display_timing */
+ 	bus_flags = 0;
+ 	vm.flags = timing->flags;

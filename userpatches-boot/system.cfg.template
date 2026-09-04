@@ -1,0 +1,9 @@
+# RK3308BS /boot/system.cfg — edit on PC (mount boot partition or rootfs /boot), reboot to apply.
+# Baked from config.env at image build; uncomment/change values as needed.
+check_interval=30
+wlan=wlan0
+
+#hostname='__HOSTNAME__'
+#TimeZone='__TIMEZONE__'
+#WIFI_SSID='__WIFI_SSID__'
+#WIFI_PASSWD='__WIFI_PASSWD__'

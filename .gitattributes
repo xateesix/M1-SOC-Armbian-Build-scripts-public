@@ -1,0 +1,29 @@
+*.sh text eol=lf
+*.py text eol=lf
+
+# Repo-wide normalization (2026-09-01): every text file in this repo should
+# use Linux-style LF line endings, never Windows-style CRLF -- this project's
+# canonical build/runtime environment is Linux (Armbian chroot, bash scripts,
+# board itself), and several past bugs this session were directly caused by
+# mismatched CRLF/LF assumptions (e.g. the WiFi password's D-suffix bug, and
+# firstboot.conf/companion-stack.env sourcing issues). `text=auto` normalizes
+# every file git detects as text to LF in the repository, regardless of what
+# line endings a given checkout/editor produces locally.
+* text=auto eol=lf
+
+# Genuine binaries -- must NOT be text-normalized (would corrupt them).
+*.bin binary
+*.img binary
+*.dtb binary
+*.deb binary
+*.tar binary
+*.tar.gz binary
+*.tar.xz binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.bmp binary
+*.mp4 binary
+*.so binary
+*.pyc binary

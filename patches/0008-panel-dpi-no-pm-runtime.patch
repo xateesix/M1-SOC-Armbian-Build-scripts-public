@@ -1,0 +1,30 @@
+--- a/drivers/gpu/drm/panel/panel-simple.c	2026-06-12 22:50:54.104910703 -0700
++++ b/drivers/gpu/drm/panel/panel-simple.c	2026-06-12 22:50:54.136911421 -0700
+@@ -835,25 +835,8 @@
+ 	 * to optimize powering the panel on briefly to read the EDID before
+ 	 * fully enabling the panel.
+ 	 */
+-	pm_runtime_enable(dev);
+-	pm_runtime_set_autosuspend_delay(dev, 1000);
+-	pm_runtime_use_autosuspend(dev);
+-
+-	{
+-		struct device_node *bl_np;
+-
+-		bl_np = of_parse_phandle(dev->of_node, "backlight", 0);
+-		if (bl_np) {
+-			struct backlight_device *bd;
+-
+-			bd = of_find_backlight_by_node(bl_np);
+-			of_node_put(bl_np);
+-			if (bd)
+-				panel->base.backlight = bd;
+-			else
+-				dev_info(dev, "backlight not ready yet, continuing\n");
+-		}
+-	}
++	/* rk3308: autosuspend fires ~1s later and panics in run_timer_softirq */
++	pm_runtime_disable(dev);
+ 
+ 	drm_panel_add(&panel->base);
+ 	dev_info(dev, "panel-simple registered %pOF\n", dev->of_node);
