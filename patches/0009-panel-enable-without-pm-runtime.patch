@@ -1,0 +1,63 @@
+--- a/drivers/gpu/drm/panel/panel-simple.c	2026-08-20 10:13:45.233737976 -0700
++++ b/drivers/gpu/drm/panel/panel-simple.c	2026-08-20 10:15:32.473138729 -0700
+@@ -319,12 +319,18 @@
+ 
+ static int panel_simple_unprepare(struct drm_panel *panel)
+ {
+-	int ret;
++	int ret = 0;
+ 
+-	pm_runtime_mark_last_busy(panel->dev);
+-	ret = pm_runtime_put_autosuspend(panel->dev);
+-	if (ret < 0)
+-		return ret;
++	if (pm_runtime_enabled(panel->dev)) {
++		pm_runtime_mark_last_busy(panel->dev);
++		ret = pm_runtime_put_autosuspend(panel->dev);
++		if (ret < 0)
++			return ret;
++	} else {
++		ret = panel_simple_suspend(panel->dev);
++		if (ret < 0)
++			return ret;
++	}
+ 
+ 	return 0;
+ }
+@@ -352,12 +358,19 @@
+ 
+ static int panel_simple_prepare(struct drm_panel *panel)
+ {
++	struct panel_simple *p = to_panel_simple(panel);
+ 	int ret;
+ 
+-	ret = pm_runtime_get_sync(panel->dev);
+-	if (ret < 0) {
+-		pm_runtime_put_autosuspend(panel->dev);
+-		return ret;
++	if (pm_runtime_enabled(panel->dev)) {
++		ret = pm_runtime_get_sync(panel->dev);
++		if (ret < 0) {
++			pm_runtime_put_autosuspend(panel->dev);
++			return ret;
++		}
++	} else {
++		ret = panel_simple_resume(panel->dev);
++		if (ret < 0)
++			return ret;
+ 	}
+ 
+ 	return 0;
+@@ -837,6 +850,12 @@
+ 	/* rk3308: autosuspend fires ~1s later and panics in run_timer_softirq */
+ 	pm_runtime_disable(dev);
+ 
++	/* rk3308: panel enable GPIO lives in runtime resume; assert it at probe */
++	if (panel->enable_gpio)
++		gpiod_set_value_cansleep(panel->enable_gpio, 1);
++	if (panel->supply)
++		regulator_enable(panel->supply);
++
+ 	drm_panel_add(&panel->base);
+ 	dev_info(dev, "panel-simple registered %pOF\n", dev->of_node);
+ 

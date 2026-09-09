@@ -1,0 +1,49 @@
+RETIRED 2026-09-07 by agent session, per user instruction.
+
+This patch added a full port of the Rockchip vendor `gt9xx` touchscreen driver
+(from armbian/linux-rockchip, branch rk-6.1-rkr7.2) to mainline kernel 6.18,
+together with the RK3308BS GT911 "fold-fix" coordinate correction baked into
+`gtp_touch_down`. It shipped in image v112/v113/v114.
+
+Why it was tried
+----------------
+The GT911 on this board (Artillery M1 Pro S1-SOC) reports its horizontal axis
+in a folded "double-width" space (a hard dead gap at chip-native X [350..749]).
+We suspected the vendor driver / factory config might handle the panel
+differently than mainline `goodix.c`, so we ported it and reprogrammed the chip
+with the factory 1080x1920 config blob.
+
+What we learned
+---------------
+1. The fold is INTRINSIC to the digitizer -- it appeared identically under
+   mainline goodix.c (v111), the vendor gt9xx driver + factory blob (v112), and
+   the vendor gt9xx driver + the chip's own config (v113). Neither the driver
+   nor the config is the variable.
+2. The v114 fold-fix (baked into the vendor driver) DID linearise the axis --
+   the inch-mark test confirmed a clean, monotonic sweep through the old dead
+   zone. BUT the vendor driver's multi-touch handling let the GT911's phantom
+   secondary contacts through: ~46% of frames near the old fold reported 2-3
+   contacts spread up to ~110 units apart, i.e. the long-standing "double touch"
+   the user reported. In a single-touch KlipperScreen UI that risks phantom
+   taps and accidental gestures.
+3. The user confirmed from direct experience that mainline `goodix.c` did NOT
+   exhibit the phantom double-touch (its input_mt_sync_frame +
+   INPUT_MT_DROP_UNUSED handling is cleaner).
+
+Superseded by
+-------------
+The fold-fix was ported to the mainline goodix.c report path instead, as a
+small single-concern patch:
+
+    patches/0015-input-touchscreen-goodix-rk3308bs-fold-fix.patch
+
+That keeps mainline's clean multi-touch de-duplication AND applies our
+coordinate correction. The DT node was reverted from `goodix,gt9xx` back to
+`goodix,gt911` (patch 0001 + build-fork config/boards DTS), and
+CONFIG_TOUCHSCREEN_GT9XX=y was removed from the build-fork kernel config
+(CONFIG_TOUCHSCREEN_GOODIX=m is retained).
+
+Retained (not deleted) in case the vendor driver is ever needed again for a
+hardware variant mainline cannot support. The pristine vendor source remains in
+the workspace at linux-rockchip-vendor/ and the validated userspace remapper at
+tools/gt9xx-unfold-remapper.c.

@@ -1,0 +1,14 @@
+[Unit]
+Description=RK3308BS: recover WiFi on first boot (reboot once if wlan0 has no IP)
+After=NetworkManager.service network-online.target rk3308bs-wifi-modules.service
+Wants=network-online.target
+ConditionPathExists=!/root/.rk3308bs-wifi-firstboot-done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rk3308bs-wifi-firstboot-recover.sh
+RemainAfterExit=yes
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

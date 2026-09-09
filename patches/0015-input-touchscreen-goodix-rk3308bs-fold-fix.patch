@@ -1,0 +1,214 @@
+--- a/drivers/input/touchscreen/goodix.c
++++ b/drivers/input/touchscreen/goodix.c
+@@ -35,6 +35,41 @@
+ #define GOODIX_MAX_CONTACT_SIZE		9
+ #define GOODIX_MAX_CONTACTS		10
+ 
++/*
++ * RK3308BS EVB (Artillery M1 Pro S1-SOC) GT911 fold-fix + single-touch clamp.
++ *
++ * This board's GT911 reports its HORIZONTAL axis (chip-native X, the first
++ * coordinate word) in a folded "double-width" space: a hard dead gap that the
++ * chip never emits at native X [350..749], with two reachable bands [50..349]
++ * and [750..1079]. The VERTICAL axis (chip-native Y, second word) is linear
++ * over roughly [588..1741]. The fold is intrinsic to the digitizer (identical
++ * under mainline goodix, the vendor gt9xx driver, the chip's own config, and
++ * the genuine factory firmware), so it is corrected in software here.
++ *
++ * The chip also frequently emits a spurious second "phantom" contact near the
++ * fold. This is a single-touch product (480x272 KlipperScreen panel); the
++ * factory firmware tolerates the phantom only because its LVGL GUI consumes a
++ * single contact. Under X11/libinput the phantom is promoted to bogus
++ * pinch/scroll gestures. We therefore report only the dominant contact
++ * (largest touch-major width == strongest capacitance == the real finger,
++ * matching the controller's own arbitration), unfolded, always in slot 0.
++ */
++#define RK3308BS_FOLD_FIX	1
++/*
++ * Horizontal (folded) axis calibration LUT. The GT911 reports this axis in two
++ * folded bands whose physical scales are DIFFERENT and individually non-linear
++ * (a ruler tap capture, one tap per cm, was used). A simple two-slope model
++ * left a mid-band sag, so we instead store the measured (chip-x -> output)
++ * calibration points and linearly interpolate between them. This maps chip x
++ * to a coordinate linear in physical position over 0..RK3308BS_Y_MAX.
++ * Points are ordered by ascending chip x; output DEscends (higher chip x =
++ * further left = smaller output). Refine by editing these pairs from a fresh
++ * ruler calibration.
++ */
++#define RK3308BS_Y_MAX		629	/* unfolded horizontal (ABS_MT_POSITION_X after rotate) max */
++#define RK3308BS_X_MIN		588	/* vertical linear min */
++#define RK3308BS_X_MAX		1153	/* vertical span 1741-588 (ABS_MT_POSITION_Y after rotate) max */
++
+ #define GOODIX_CONFIG_MIN_LENGTH	186
+ #define GOODIX_CONFIG_911_LENGTH	186
+ #define GOODIX_CONFIG_967_LENGTH	228
+@@ -401,7 +436,111 @@
+ 	input_sync(ts->input_pen);
+ }
+ 
+-static void goodix_ts_report_touch_8b(struct goodix_ts_data *ts, u8 *coor_data)
++#if RK3308BS_FOLD_FIX
++/* Measured chip-x -> output calibration (ascending chip x; output descends). */
++static const short rk3308bs_h_raw[] = {
++	73, 122, 218, 256, 316, 773, 849, 967, 1079,
++};
++static const short rk3308bs_h_out[] = {
++	629, 569, 489, 410, 330, 251, 171, 92, 0,
++};
++#define RK3308BS_H_N ARRAY_SIZE(rk3308bs_h_raw)
++
++/* Map a chip-x value to the unfolded, linear-in-physical horizontal output. */
++static int rk3308bs_h_map(int x)
++{
++	int i;
++
++	if (x <= rk3308bs_h_raw[0])
++		return rk3308bs_h_out[0];
++	if (x >= rk3308bs_h_raw[RK3308BS_H_N - 1])
++		return rk3308bs_h_out[RK3308BS_H_N - 1];
++
++	for (i = 0; i < RK3308BS_H_N - 1; i++) {
++		int r0 = rk3308bs_h_raw[i], r1 = rk3308bs_h_raw[i + 1];
++
++		if (x <= r1) {
++			int o0 = rk3308bs_h_out[i], o1 = rk3308bs_h_out[i + 1];
++
++			return o0 + (o1 - o0) * (x - r0) / (r1 - r0);
++		}
++	}
++	return rk3308bs_h_out[RK3308BS_H_N - 1];
++}
++
++/*
++ * Convert chip-native (in_x, in_y) into corrected, unfolded, display-oriented
++ * ABS coordinates.
++ *
++ * Horizontal: in_x (folded) -> h via the calibration LUT (linear in physical
++ *             position, 0..Y_MAX).
++ * Vertical:   in_y is linear; offset to 0..X_MAX.
++ *
++ * Then rotate to match the panel (axes swapped, vertical inverted):
++ *   *out_x (ABS_MT_POSITION_X, 0..Y_MAX=629 ) <- h
++ *   *out_y (ABS_MT_POSITION_Y, 0..X_MAX=1153) <- X_MAX - v
++ */
++static void rk3308bs_fold_fix(int in_x, int in_y, int *out_x, int *out_y)
++{
++	int v = in_y - RK3308BS_X_MIN;
++	int h = rk3308bs_h_map(in_x);
++
++	if (v < 0)
++		v = 0;
++	if (v > RK3308BS_X_MAX)
++		v = RK3308BS_X_MAX;
++	if (h < 0)
++		h = 0;
++	if (h > RK3308BS_Y_MAX)
++		h = RK3308BS_Y_MAX;
++
++	*out_x = h;
++	*out_y = RK3308BS_X_MAX - v;
++}
++/*
++ * Report a single contact for this board. Among all reported contacts pick the
++ * one with the largest touch-major width (the real finger; the phantom near
++ * the fold has a weaker capacitance profile), unfold it, and report it in a
++ * fixed slot 0 so userspace sees one stable tracking id. Any other slots are
++ * released by input_mt_sync_frame() (INPUT_MT_DROP_UNUSED).
++ */
++static void rk3308bs_report_single(struct goodix_ts_data *ts, u8 *point_data,
++				   int touch_num)
++{
++	int xoff = (ts->contact_size == 9) ? 3 : 1;
++	int best = -1, best_w = -1;
++	int out_x, out_y, i;
++	u8 *c;
++
++	for (i = 0; i < touch_num; i++) {
++		int w;
++
++		c = &point_data[1 + ts->contact_size * i];
++		w = get_unaligned_le16(&c[xoff + 4]);
++		if (w > best_w) {
++			best_w = w;
++			best = i;
++		}
++	}
++
++	if (best < 0)
++		return;
++
++	c = &point_data[1 + ts->contact_size * best];
++	rk3308bs_fold_fix(get_unaligned_le16(&c[xoff]),
++			  get_unaligned_le16(&c[xoff + 2]), &out_x, &out_y);
++
++	input_mt_slot(ts->input_dev, 0);
++	input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, true);
++	input_report_abs(ts->input_dev, ABS_MT_POSITION_X, out_x);
++	input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, out_y);
++	input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, best_w);
++	input_report_abs(ts->input_dev, ABS_MT_WIDTH_MAJOR, best_w);
++}
++#endif
++
++static void __maybe_unused
++goodix_ts_report_touch_8b(struct goodix_ts_data *ts, u8 *coor_data)
+ {
+ 	int id = coor_data[0] & 0x0F;
+ 	int input_x = get_unaligned_le16(&coor_data[1]);
+@@ -416,7 +555,8 @@
+ 	input_report_abs(ts->input_dev, ABS_MT_WIDTH_MAJOR, input_w);
+ }
+ 
+-static void goodix_ts_report_touch_9b(struct goodix_ts_data *ts, u8 *coor_data)
++static void __maybe_unused
++goodix_ts_report_touch_9b(struct goodix_ts_data *ts, u8 *coor_data)
+ {
+ 	int id = coor_data[1] & 0x0F;
+ 	int input_x = get_unaligned_le16(&coor_data[3]);
+@@ -469,7 +609,7 @@
+ {
+ 	u8  point_data[2 + GOODIX_MAX_CONTACT_SIZE * GOODIX_MAX_CONTACTS];
+ 	int touch_num;
+-	int i;
++	int i __maybe_unused;
+ 
+ 	touch_num = goodix_ts_read_input_report(ts, point_data);
+ 	if (touch_num < 0)
+@@ -486,6 +626,9 @@
+ 
+ 	goodix_ts_report_key(ts, point_data);
+ 
++#if RK3308BS_FOLD_FIX
++	rk3308bs_report_single(ts, point_data, touch_num);
++#else
+ 	for (i = 0; i < touch_num; i++)
+ 		if (ts->contact_size == 9)
+ 			goodix_ts_report_touch_9b(ts,
+@@ -493,6 +636,7 @@
+ 		else
+ 			goodix_ts_report_touch_8b(ts,
+ 				&point_data[1 + ts->contact_size * i]);
++#endif
+ 
+ sync:
+ 	input_mt_sync_frame(ts->input_dev);
+@@ -1233,6 +1377,19 @@
+ 		input_set_poll_interval(ts->input_dev, GOODIX_POLL_INTERVAL_MS);
+ 	}
+ 
++#if RK3308BS_FOLD_FIX
++	/*
++	 * Advertise the corrected, unfolded coordinate ranges (see fold-fix).
++	 * Override both the MT axes and the single-touch ABS_X/ABS_Y axes (the
++	 * latter are emulated from slot 0 by INPUT_MT_DIRECT) so every consumer
++	 * sees the same range.
++	 */
++	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_X, 0, RK3308BS_Y_MAX, 0, 0);
++	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_Y, 0, RK3308BS_X_MAX, 0, 0);
++	input_set_abs_params(ts->input_dev, ABS_X, 0, RK3308BS_Y_MAX, 0, 0);
++	input_set_abs_params(ts->input_dev, ABS_Y, 0, RK3308BS_X_MAX, 0, 0);
++#endif
++
+ 	error = input_register_device(ts->input_dev);
+ 	if (error) {
+ 		dev_err(&ts->client->dev,

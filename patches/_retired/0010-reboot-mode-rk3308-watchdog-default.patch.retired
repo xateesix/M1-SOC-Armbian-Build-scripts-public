@@ -1,0 +1,21 @@
+--- a/drivers/power/reset/reboot-mode.c	2026-08-20 10:20:46.376166996 -0700
++++ b/drivers/power/reset/reboot-mode.c	2026-08-20 10:25:20.395302837 -0700
+@@ -52,9 +52,18 @@
+ 			      unsigned long mode, void *cmd)
+ {
+ 	struct reboot_mode_driver *reboot;
++	struct device_node *grf;
+ 	unsigned int magic;
+ 
+ 	reboot = container_of(this, struct reboot_mode_driver, reboot_notifier);
++
++	/* RK3308: mode-normal soft reset leaves SDIO/GPIO state stuck */
++	if (!cmd) {
++		grf = of_get_parent(reboot->dev->of_node);
++		if (grf && of_device_is_compatible(grf, "rockchip,rk3308-grf"))
++			cmd = "watchdog";
++	}
++
+ 	magic = get_reboot_mode_magic(reboot, cmd);
+ 	if (magic)
+ 		reboot->write(reboot, magic);

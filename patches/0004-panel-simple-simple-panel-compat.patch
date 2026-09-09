@@ -1,0 +1,127 @@
+diff --git a/drivers/gpu/drm/panel/panel-simple.c b/drivers/gpu/drm/panel/panel-simple.c
+index 0019de93b..14867d772 100644
+--- a/drivers/gpu/drm/panel/panel-simple.c
++++ b/drivers/gpu/drm/panel/panel-simple.c
+@@ -482,6 +482,94 @@ static struct panel_desc *panel_dpi_probe(struct device *dev)
+ 	return desc;
+ }
+ 
++
++/* Factory RK3308 DT uses legacy "simple-panel" + display-timings (5.10 binding). */
++static struct panel_desc *panel_simple_desc_from_timing(struct device *dev,
++						struct display_timing *timing)
++{
++	struct panel_desc *desc;
++	struct videomode vm;
++	unsigned int bus_flags;
++	u32 bus_format;
++
++	desc = devm_kzalloc(dev, sizeof(*desc), GFP_KERNEL);
++	if (!desc)
++		return ERR_PTR(-ENOMEM);
++
++	desc->timings = timing;
++	desc->num_timings = 1;
++	desc->bpc = 8;
++	desc->connector_type = DRM_MODE_CONNECTOR_DPI;
++	if (!of_property_read_u32(dev->of_node, "bus-format", &bus_format))
++		desc->bus_format = bus_format;
++
++	videomode_from_timing(timing, &vm);
++	drm_bus_flags_from_videomode(&vm, &bus_flags);
++	desc->bus_flags = bus_flags;
++
++	of_property_read_u32(dev->of_node, "width-mm", &desc->size.width);
++	of_property_read_u32(dev->of_node, "height-mm", &desc->size.height);
++
++	return desc;
++}
++
++static struct panel_desc *panel_simple_from_display_timings(struct device *dev)
++{
++	struct device_node *timings_np;
++	struct display_timings *timings;
++	struct display_timing *timing;
++	struct panel_desc *desc;
++	static const char * const fallback_names[] = { "timing3", "timing0", NULL };
++	int i;
++
++	timings = of_get_display_timings(dev->of_node);
++	if (timings) {
++		timing = display_timings_get(timings, timings->native_mode);
++		if (!timing)
++			timing = display_timings_get(timings, 0);
++		if (!timing) {
++			display_timings_release(timings);
++			dev_err(dev, "display-timings: no usable mode\n");
++			return ERR_PTR(-EINVAL);
++		}
++
++		timing = devm_kmemdup(dev, timing, sizeof(*timing), GFP_KERNEL);
++		display_timings_release(timings);
++		if (!timing)
++			return ERR_PTR(-ENOMEM);
++
++		return panel_simple_desc_from_timing(dev, timing);
++	}
++
++	timings_np = of_get_child_by_name(dev->of_node, "display-timings");
++	if (!timings_np) {
++		dev_err(dev, "missing display-timings node\n");
++		return ERR_PTR(-ENODEV);
++	}
++
++	timing = devm_kzalloc(dev, sizeof(*timing), GFP_KERNEL);
++	if (!timing) {
++		of_node_put(timings_np);
++		return ERR_PTR(-ENOMEM);
++	}
++
++	for (i = 0; fallback_names[i]; i++) {
++		if (!of_get_display_timing(timings_np, fallback_names[i], timing))
++			break;
++	}
++	of_node_put(timings_np);
++
++	if (fallback_names[i]) {
++		desc = panel_simple_desc_from_timing(dev, timing);
++		if (!IS_ERR(desc))
++			dev_info(dev, "using fallback timing %s\n", fallback_names[i]);
++		return desc;
++	}
++
++	dev_err(dev, "failed to parse display-timings\n");
++	return ERR_PTR(-ENODEV);
++}
++
+ #define PANEL_SIMPLE_BOUNDS_CHECK(to_check, bounds, field) \
+ 	(to_check->field.typ >= bounds->field.min && \
+ 	 to_check->field.typ <= bounds->field.max)
+@@ -599,6 +687,8 @@ static const struct panel_desc *panel_simple_get_desc(struct device *dev)
+ 			 */
+ 			if (of_device_is_compatible(dev->of_node, "panel-dpi"))
+ 				return panel_dpi_probe(dev);
++			if (of_device_is_compatible(dev->of_node, "simple-panel"))
++				return panel_simple_from_display_timings(dev);
+ 			else
+ 				return ERR_PTR(-ENODEV);
+ 		}
+@@ -630,7 +720,7 @@ static struct panel_simple *panel_simple_probe(struct device *dev)
+ 
+ 	panel->desc = desc;
+ 
+-	panel->supply = devm_regulator_get(dev, "power");
++	panel->supply = devm_regulator_get_optional(dev, "power");
+ 	if (IS_ERR(panel->supply))
+ 		return ERR_CAST(panel->supply);
+ 
+@@ -5454,6 +5544,9 @@ static const struct of_device_id platform_of_match[] = {
+ 	}, {
+ 		.compatible = "microchip,ac69t88a",
+ 		.data = &mchp_ac69t88a,
++	}, {
++		.compatible = "simple-panel",
++		.data = NULL,
+ 	}, {
+ 		/* Must be the last entry */
+ 		.compatible = "panel-dpi",

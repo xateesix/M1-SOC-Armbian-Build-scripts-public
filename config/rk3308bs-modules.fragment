@@ -1,0 +1,15 @@
+# RK3308BS display: rockchipdrm as module (avoids __run_timers panic on 2nd boot).
+# panel-simple + pwm_bl built-in (factory order); module insmod never bound the panel node.
+# ROCKCHIP_VOP / ROCKCHIP_RGB are Kconfig bool (y/n only — never =m).
+CONFIG_DRM_ROCKCHIP=m
+CONFIG_ROCKCHIP_VOP=y
+# CONFIG_ROCKCHIP_VOP2 is not set
+CONFIG_ROCKCHIP_RGB=y
+CONFIG_DRM_PANEL_SIMPLE=y
+CONFIG_BACKLIGHT_PWM=y
+CONFIG_PWM=y
+CONFIG_PWM_ROCKCHIP=y
+CONFIG_DRM_KMS_HELPER=y
+CONFIG_DRM_GEM_DMA_HELPER=y
+CONFIG_DRM_FBDEV_EMULATION=y
+CONFIG_FB=y

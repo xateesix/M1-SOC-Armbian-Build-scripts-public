@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: $0 <script-or-command> [args...]"
+    exit 2
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Logs/output live in the Armbian build repo (this repo no longer nests it;
+# they're sibling repos under WORKSPACE_ROOT since the 2026-09 repo restructure).
+ROOT_DIR="$WORKSPACE_ROOT/M1-SOC-Armbian-Build"
+OUT_DIR="$ROOT_DIR/output/smart-build"
+mkdir -p "$OUT_DIR"
+
+ts="$(date +%Y%m%d-%H%M%S)"
+id="${ts}-${RANDOM}${RANDOM}"
+raw_log="$OUT_DIR/${id}.raw.log"
+view_log="$OUT_DIR/${id}.view.log"
+summary_log="$OUT_DIR/${id}.summary.log"
+
+echo "=== smart-build start ==="
+echo "id=$id"
+echo "root=$ROOT_DIR"
+echo "raw_log=$raw_log"
+echo "view_log=$view_log"
+echo "summary_log=$summary_log"
+
+cd "$ROOT_DIR"
+
+set +e
+stdbuf -oL -eL "$@" 2>&1 | tee "$raw_log"
+cmd_ec=${PIPESTATUS[0]}
+set -e
+
+cp "$raw_log" "$view_log"
+
+{
+    echo "=== smart-build summary ==="
+    echo "id=$id"
+    echo "exit_code=$cmd_ec"
+    echo "raw_log=$raw_log"
+    echo "view_log=$view_log"
+    echo "tail:"
+    tail -n 80 "$raw_log" || true
+    if [[ $cmd_ec -eq 0 ]]; then
+        echo "smart-build-wrapper-ok"
+    else
+        echo "smart-build-wrapper-failed"
+    fi
+} >"$summary_log"
+
+echo "=== smart-build end ==="
+echo "exit_code=$cmd_ec"
+echo "summary_log=$summary_log"
+
+exit "$cmd_ec"

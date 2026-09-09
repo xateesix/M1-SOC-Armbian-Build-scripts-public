@@ -1,0 +1,11 @@
+#!/bin/bash
+# MOTD hint: point the user at the companion-stack (KlipperScreen + Crowsnest)
+# setup script until they've run it once. Silent afterward.
+[[ -f /etc/rk3308bs/.companion-stack-configured ]] && exit 0
+[[ -f /etc/rk3308bs/companion-stack.env ]] || exit 0
+
+cat <<'EOF'
+
+  Companion stack (KlipperScreen + Crowsnest) not yet configured.
+  Run: /usr/local/sbin/rk3308bs-setup-companion-stack.sh
+EOF
