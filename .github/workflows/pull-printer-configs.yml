@@ -2,8 +2,8 @@ name: Scheduled Printer Config Sync
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Automatically runs every night at midnight UTC
-  workflow_dispatch:   # Allows you to click a button to run it manually anytime
+    - cron: '0 0 * * *' # Automatically runs every night at midnight UTC.
+  workflow_dispatch:   # Allows you to click a button to run it manually anytime.
 
 permissions:
   contents: write
