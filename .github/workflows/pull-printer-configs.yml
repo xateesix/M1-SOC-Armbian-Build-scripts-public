@@ -1,0 +1,51 @@
+name: Scheduled Printer Config Sync
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Automatically runs every night at midnight UTC
+  workflow_dispatch:   # Allows you to click a button to run it manually anytime
+
+permissions:
+  contents: write
+
+jobs:
+  sync-configs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Project Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone Printer Backup Repo
+        uses: actions/checkout@v4
+        with:
+          repository: '${{ github.repository_owner }}/klipper-m1-backup'
+          token: ${{ secrets.SYNC_TOKEN }}
+          path: temp_printer_repo
+
+      - name: Safely Sync Folder Structure
+        run: |
+          # Create the path if it doesn't exist in your project repo
+          mkdir -p printer_data/config
+
+          # Safely copy files over without deleting project-specific items
+          rsync -av --exclude='.git/' temp_printer_repo/ printer_data/config/
+
+          # Clean up the temporary cloning directory
+          rm -rf temp_printer_repo
+
+      - name: Commit and Push to Project Repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add printer_data/config/
+          
+          # Only commit and push if there are actual changes found
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "Automated sync: Cloned printer configurations from backup repo"
+            git push origin main
+          else
+            echo "No new printer configuration changes detected."
+          fi
