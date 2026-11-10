@@ -1,18 +1,9 @@
 #!/bin/bash
-# Interactive post-first-boot setup for this board's companion role: KlipperScreen
-# (touchscreen UI) + Crowsnest (camera stream) connecting to a REMOTE Klipper +
-# Moonraker host (a separate "main" printer-control board). This board does NOT
-# run Klipper itself -- it is a client/companion device only.
-#
-# The actual Klipper/Moonraker/KlipperScreen/Crowsnest repos are already staged
-# at build time by userpatches-chroot/35-rk3308bs-companion-stack.sh (see
-# /etc/rk3308bs/companion-stack.env and /etc/rk3308bs/companion-stack-readme.txt).
-# This script's job is just to: (1) collect the remote host's IP interactively,
-# (2) wire that into the config files KlipperScreen/Moonraker-client expect,
-# (3) make KIAUH trivially easy to launch, and (4) hand off to KIAUH's own
-# interactive installer for the actual KlipperScreen/Crowsnest install -- KIAUH
-# handles its own OS package dependencies, so we deliberately do not duplicate
-# that logic here.
+# Interactive post-first-boot setup for the companion role: KlipperScreen (touch UI) and
+# Crowsnest (camera stream) against a REMOTE Klipper/Moonraker host. This board does not run Klipper.
+# Only KIAUH is pre-staged at build time (see /etc/rk3308bs/companion-stack.env). This script
+# collects the remote host IP, seeds ~/printer_data/config samples for it, makes KIAUH easy to
+# launch and hands off to KIAUH for the install (KIAUH handles its own package dependencies).
 set -euo pipefail
 
 ENV_FILE=/etc/rk3308bs/companion-stack.env

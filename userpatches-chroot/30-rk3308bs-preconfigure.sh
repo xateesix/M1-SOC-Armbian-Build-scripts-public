@@ -1,20 +1,9 @@
 #!/bin/bash
-# Bake locale, timezone, users, and WiFi into rootfs during compile.sh (no first-boot wizard).
-#
-# NOTE (2026-08-31): this hook has never actually received ROOT_PASSWORD/USER_*/WIFI_*
-# as real environment variables -- build-from-source-linux.sh only ever uses those
-# values to populate PRESET_* variables in firstboot.conf (the actual, validated,
-# working credential-delivery mechanism this session, via Armbian's standard
-# armbian-firstlogin first-boot wizard). No code path exports these as literal env
-# vars reachable inside the chroot for this specific hook to read -- and this hook
-# was ALSO never even invoked at all until the "actually invoke customize_image()"
-# fix, so this gap was invisible until now. Rather than hard-failing the build (via
-# `${ROOT_PASSWORD:?...}`) every time, degrade gracefully: skip this hook's build-time
-# credential-baking entirely and rely on the proven firstboot.conf/PRESET_* path.
-# TODO (tracked as rk3308bs-preconfigure-hook-orphaned in SQL todos): decide whether
-# to properly wire ROOT_PASSWORD/USER_NAME/USER_PASSWORD/WIFI_SSID/WIFI_PASSWORD
-# through as real env vars so PRECONFIGURE_CREDENTIALS=1 can genuinely skip the
-# first-boot wizard as its name implies, or retire this hook entirely.
+# Bake locale, timezone, users and WiFi into the rootfs during compile.sh.
+# Currently a no-op: ROOT_PASSWORD/USER_*/WIFI_* never reach this hook as environment
+# variables. Credentials arrive through PRESET_* in firstboot.conf (Armbian first-login
+# wizard), so the hook exits 0 instead of failing the build.
+# TODO: export those variables so PRECONFIGURE_CREDENTIALS=1 can skip the wizard, or retire this hook.
 set -euo pipefail
 
 if [[ -z "${ROOT_PASSWORD:-}" ]]; then

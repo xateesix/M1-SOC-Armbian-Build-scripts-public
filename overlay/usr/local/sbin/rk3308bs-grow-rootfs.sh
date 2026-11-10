@@ -1,21 +1,8 @@
 #!/bin/bash
-# Safely grow the ext4 rootfs filesystem to fill its existing eMMC partition on first boot.
-#
-# Unlike Armbian's stock armbian-resize-filesystem.service (intentionally disabled by
-# 25-rk3308bs-emmc-layout.sh), this does NOT touch the GPT partition table -- our
-# eMMC's partition layout is fixed by parameter.txt (the factory bootloader chain
-# reads fixed offsets for MiniLoader/uboot/trust/boot/rootfs) and must never be
-# resized/rewritten by growpart-style tools. This script only runs `resize2fs` on
-# the already-existing, already-correctly-sized rootfs PARTITION, which is a safe,
-# purely-filesystem-level operation with no partition-table risk at all.
-#
-# Needed because: the rootfs image is built/packed at a shrunk size (for faster
-# flashing), but the actual eMMC partition it gets written into is already the
-# full ~7.2GB fixed size -- without this, the filesystem never grows to use that
-# space (discovered 2026-08-31 on v91: `df` showed 1.6G/97% used inside a 7.2GB
-# partition, once 25-rk3308bs-emmc-layout.sh started actually running for the
-# first time ever and disabling Armbian's own resize service that would have
-# otherwise grown it, unsafely, via the GPT-modifying path).
+# Grow the ext4 rootfs to fill its eMMC partition on first boot (resize2fs only).
+# The GPT is never touched: the layout is fixed by parameter.txt and the factory bootloader
+# reads fixed offsets, so Armbian's growpart-based resize service is disabled by
+# 25-rk3308bs-emmc-layout.sh. Needed because the image is packed at a shrunk size.
 set -euo pipefail
 
 FLAG=/root/.rk3308bs-rootfs-grown
